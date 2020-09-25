@@ -19,6 +19,9 @@ int main(int argc, const char * argv[]) {
         [p sayHello];
         [p sayCode];
         [p sayMaster];
+        
+        //测试一下
+        [p sayNB];
 //        [p sayNB];
 
 
