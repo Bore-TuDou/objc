@@ -675,6 +675,7 @@ void cache_t::insert(Class cls, SEL sel, IMP imp, id receiver)
     // minimum size is 4 and we resized at 3/4 full.
     do {
         if (fastpath(b[i].sel() == 0)) {
+            //如果b[i].sel()为0的话则Occupied并且将bucket存到该位置
             incrementOccupied();
             b[i].set<Atomic, Encoded>(sel, imp, cls);
             return;
