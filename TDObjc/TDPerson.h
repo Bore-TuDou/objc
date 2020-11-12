@@ -23,6 +23,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (void)sayHappy;
 
+
 @end
 
 NS_ASSUME_NONNULL_END
