@@ -219,10 +219,13 @@ LExit$0:
 .macro CheckMiss
 	// miss if bucket->sel == 0
 .if $0 == GETIMP
+//--- 如果为GETIMP ，则跳转至 LGetImpMiss
 	cbz	p9, LGetImpMiss
 .elseif $0 == NORMAL
+//--- 如果为NORMAL ，则跳转至 __objc_msgSend_uncached  也就是慢速查找流程
 	cbz	p9, __objc_msgSend_uncached
 .elseif $0 == LOOKUP
+//--- 如果为LOOKUP ，则跳转至 __objc_msgLookup_uncached
 	cbz	p9, __objc_msgLookup_uncached
 .else
 .abort oops
@@ -231,10 +234,13 @@ LExit$0:
 
 .macro JumpMiss
 .if $0 == GETIMP
+//--- 如果为GETIMP ，则跳转至 LGetImpMiss
 	b	LGetImpMiss
 .elseif $0 == NORMAL
+//--- 如果为NORMAL ，则跳转至 __objc_msgSend_uncached  也就是慢速查找流程
 	b	__objc_msgSend_uncached
 .elseif $0 == LOOKUP
+//--- 如果为LOOKUP ，则跳转至 __objc_msgLookup_uncached
 	b	__objc_msgLookup_uncached
 .else
 .abort oops
@@ -266,12 +272,24 @@ LExit$0:
 LLookupStart$1:
 
 	// p1 = SEL, p16 = isa
+    //#CACHE = #define CACHE            (2 * __SIZEOF_POINTER__)
+    //__SIZEOF_POINTER__表示pointer的大小 #CACHE = 16
+    //x16 isa首地址   类信息中前两个参数 isa占用8位  superclass同样暂用8位
+    // 第三个参数是cache 所以isa平移16位刚好是cache（mask高16位 + buckets低48位）
 	ldr	p11, [x16, #CACHE]				// p11 = mask|buckets
 
 #if CACHE_MASK_STORAGE == CACHE_MASK_STORAGE_HIGH_16
+    //如果是真机
+    //p11(cache) & 0x0000ffffffffffff ，mask高16位抹零，得到buckets 存入p10寄存器-- 即去掉mask，留下buckets
 	and	p10, p11, #0x0000ffffffffffff	// p10 = buckets
+    //计算步骤：
+    // 1. p11, LSR #48   p11右移48位的到mask
+    // 2. p1 & 上一步的结果也就是mask p1是objc_msgSend的第二个参数也就是sel
+    // 方法存入到cache的下标计算公式是sel & mask 所以第二步结果可以得到方法存储的下标
+    // 3. 第二步得到的index存到p12寄存器中
 	and	p12, p1, p11, LSR #48		// x12 = _cmd & mask
 #elif CACHE_MASK_STORAGE == CACHE_MASK_STORAGE_LOW_4
+    //非真机情况下
 	and	p10, p11, #~0xf			// p10 = buckets
 	and	p11, p11, #0xf			// p11 = maskShift
 	mov	p12, #0xffff
@@ -282,26 +300,43 @@ LLookupStart$1:
 #endif
 
 
+    //p10 =buckets p12下标
+    // #define PTRSHIFT 3 #(1+PTRSHIFT) = 4
+    // p12, LSL #(1+PTRSHIFT) = p12 << 4 =  ((_cmd & mask) << (1+PTRSHIFT)) = butket 实际偏移量
+    //p10+butket 实际偏移量 = 对应的bucket  所以p12 = bucket
 	add	p12, p10, p12, LSL #(1+PTRSHIFT)
 		             // p12 = buckets + ((_cmd & mask) << (1+PTRSHIFT))
 
+    //冲bucket分别取出imp和sel存到p17和p9
 	ldp	p17, p9, [x12]		// {imp, sel} = *bucket
+    //p9根据上述步骤找到的sel和objc_msgSend传入的sel相对比
 1:	cmp	p9, p1			// if (bucket->sel != _cmd)
+    //不相等跳到对应2位置的代码
 	b.ne	2f			//     scan more
+    //相等命中缓存返回imp
 	CacheHit $0			// call or return imp
 	
 2:	// not hit: p12 = not-hit bucket
+    // 如果从最后一个元素往前遍历都找不到缓存，那么走 `CheckMiss`
+    // 应为该查找过程是向前查找下面会有说明
 	CheckMiss $0			// miss if bucket->sel == 0
+    //p12 当前的bucket和第一个bucket相比
 	cmp	p12, p10		// wrap if bucket == buckets
+    //如果相等跳转到第三步
 	b.eq	3f
+    //不相等的话向前移动一个bucket也就是取上一个bucket  然后拿到对应的sel和imp继续冲第一步开始往下走
 	ldp	p17, p9, [x12, #-BUCKET_SIZE]!	// {imp, sel} = *--bucket
+    //递归查找继续返回到第一步
 	b	1b			// loop
 
 3:	// wrap: p12 = first bucket, w11 = mask
 #if CACHE_MASK_STORAGE == CACHE_MASK_STORAGE_HIGH_16
+    //如果是真机的状态下
+    // 找到buckets中的最后一个bucket存到p12中
 	add	p12, p12, p11, LSR #(48 - (1+PTRSHIFT))
 					// p12 = buckets + (mask << 1+PTRSHIFT)
 #elif CACHE_MASK_STORAGE == CACHE_MASK_STORAGE_LOW_4
+    //模拟器的状态下
 	add	p12, p12, p11, LSL #(1+PTRSHIFT)
 					// p12 = buckets + (mask << 1+PTRSHIFT)
 #else
@@ -311,15 +346,24 @@ LLookupStart$1:
 	// Clone scanning loop to miss instead of hang when cache is corrupt.
 	// The slow path may detect any corruption and halt later.
 
+    //同样的取imp和sel  和上面的步骤相同只不过是冲最后一个bucket开始
 	ldp	p17, p9, [x12]		// {imp, sel} = *bucket
+    //继续和传入的sel作对比
 1:	cmp	p9, p1			// if (bucket->sel != _cmd)
+    //不相等跳转到第二步
 	b.ne	2f			//     scan more
+    //否则命中缓存返回imp
 	CacheHit $0			// call or return imp
 	
 2:	// not hit: p12 = not-hit bucket
+// 如果从最后一个元素往前遍历都找不到缓存，那么走 `CheckMiss`
+// 应为该查找过程是向前查找下面会有说明
 	CheckMiss $0			// miss if bucket->sel == 0
+//和第一个bucket比较
 	cmp	p12, p10		// wrap if bucket == buckets
+//如果相同跳转到第三步
 	b.eq	3f
+//不相同取出上一个bucket的sel 和 imp继续递归查找
 	ldp	p17, p9, [x12, #-BUCKET_SIZE]!	// {imp, sel} = *--bucket
 	b	1b			// loop
 
