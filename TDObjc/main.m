@@ -16,6 +16,7 @@ int main(int argc, const char * argv[]) {
         // insert code here...
         TDPerson *p  = [TDPerson alloc];
         Class pClass = [TDPerson class];
+        [p test];
         [p sayHello];
         [p sayCode];
         [p sayMaster];
