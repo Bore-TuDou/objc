@@ -20,11 +20,11 @@
     NSLog(@"LGPerson say : %s",__func__);
 }
 
-- (void)sayNB{
-    NSLog(@"LGPerson say : %s",__func__);
-}
-
-+ (void)sayHappy{
-    NSLog(@"LGPerson say : %s",__func__);
-}
+//- (void)sayNB{
+//    NSLog(@"LGPerson say : %s",__func__);
+//}
+//
+//+ (void)sayHappy{
+//    NSLog(@"LGPerson say : %s",__func__);
+//}
 @end

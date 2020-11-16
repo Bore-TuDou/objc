@@ -631,6 +631,7 @@ LGetImpMiss:
 	STATIC_ENTRY __objc_msgForward_impcache
 
 	// No stret specialization.
+    //直接跳转到该方法
 	b	__objc_msgForward
 
 	END_ENTRY __objc_msgForward_impcache
@@ -638,7 +639,9 @@ LGetImpMiss:
 	
 	ENTRY __objc_msgForward
 
+    //赋值到x17寄存器中
 	adrp	x17, __objc_forward_handler@PAGE
+    //返回x17寄存器的地址
 	ldr	p17, [x17, __objc_forward_handler@PAGEOFF]
 	TailCallFunctionPointer x17
 	
